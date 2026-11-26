@@ -276,9 +276,19 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     public DuctModelData getDuctModelData() {
 
         if (modelData.needsRefresh()) {
-            calcDuctModelDataServer();
+            if (level != null && level.isClientSide()) {
+                updateModelDataFromNeighbors();
+            } else {
+                calcDuctModelDataServer();
+            }
         }
         return modelData;
+    }
+
+    public void invalidateDuctModelData() {
+
+        modelData.setNeedsRefresh();
+        requestModelDataUpdate();
     }
 
     protected void callNeighborStateChange() {
@@ -295,6 +305,14 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     @Override
     public ModelData getModelData() {
 
+        updateModelDataFromNeighbors();
+        return ModelData.builder()
+                .with(DUCT_MODEL_DATA, modelData)
+                .build();
+    }
+
+    private void updateModelDataFromNeighbors() {
+
         modelData.clearState();
         for (Direction dir : DIRECTIONS) {
             IDuct<?, ?> adjacent = GridHelper.getGridHost(level, getBlockPos().relative(dir));
@@ -302,9 +320,6 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
             modelData.setExternalConnection(dir, canConnectToBlock(dir) || connections[dir.ordinal()] == FORCED);
             modelData.setAttachment(dir, attachments[dir.ordinal()].getTexture());
         }
-        return ModelData.builder()
-                .with(DUCT_MODEL_DATA, modelData)
-                .build();
     }
 
     // region NETWORK
@@ -371,7 +386,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
                 }
             }
         }
-        requestModelDataUpdate();
+        invalidateDuctModelData();
     }
     // endregion
 
@@ -387,6 +402,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
 
         super.loadAdditional(tag, registries);
+        modelData.setNeedsRefresh();
 
         redstonePower = tag.getInt(TAG_RS_POWER);
 

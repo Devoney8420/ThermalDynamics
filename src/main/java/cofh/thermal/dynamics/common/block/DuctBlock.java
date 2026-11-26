@@ -14,8 +14,6 @@ import cofh.thermal.dynamics.api.grid.IGridHostLuminous;
 import cofh.thermal.dynamics.common.block.entity.duct.DuctBlockEntity;
 import cofh.thermal.dynamics.common.item.AttachmentItem;
 import com.google.common.collect.ImmutableSet;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -48,6 +46,8 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 
 import static cofh.core.util.helpers.ItemHelper.consumeItem;
@@ -57,7 +57,7 @@ public class DuctBlock extends Block implements EntityBlock, SimpleWaterloggedBl
 
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
 
-    private static final Int2ObjectMap<MultiIndexedVoxelShape> SHAPE_CACHE = new Int2ObjectOpenHashMap<>(512);
+    private static final ConcurrentMap<Integer, VoxelShape> SHAPE_CACHE = new ConcurrentHashMap<>();
     private static final IndexedVoxelShape BASE_SHAPE = new IndexedVoxelShape(Block.box(4.5, 4.5, 4.5, 11.5, 11.5, 11.5), 0);
 
     private static final IndexedVoxelShape[] INTERNAL_CONNECTION = new IndexedVoxelShape[]{
@@ -88,9 +88,14 @@ public class DuctBlock extends Block implements EntityBlock, SimpleWaterloggedBl
 
     private static VoxelShape getConnectionShape(int connectionState) {
 
-        if (SHAPE_CACHE.containsKey(connectionState)) {
-            return SHAPE_CACHE.get(connectionState);
+        if (connectionState <= 0) {
+            return BASE_SHAPE;
         }
+        return SHAPE_CACHE.computeIfAbsent(connectionState, DuctBlock::buildConnectionShape);
+    }
+
+    private static VoxelShape buildConnectionShape(int connectionState) {
+
         ImmutableSet.Builder<IndexedVoxelShape> cuboids = ImmutableSet.builder();
         cuboids.add(BASE_SHAPE);
         for (int i = 0; i < 6; ++i) {
@@ -100,9 +105,7 @@ public class DuctBlock extends Block implements EntityBlock, SimpleWaterloggedBl
                 cuboids.add(INTERNAL_CONNECTION[i]);
             }
         }
-        MultiIndexedVoxelShape retShape = new MultiIndexedVoxelShape(cuboids.build());
-        SHAPE_CACHE.put(connectionState, retShape);
-        return retShape;
+        return new MultiIndexedVoxelShape(cuboids.build());
     }
 
     @Override
@@ -292,8 +295,8 @@ public class DuctBlock extends Block implements EntityBlock, SimpleWaterloggedBl
         }
         if (worldIn.isClientSide()) {
             BlockEntity tile = worldIn.getBlockEntity(currentPos);
-            if (tile instanceof DuctBlockEntity<?, ?>) {
-                tile.requestModelDataUpdate();
+            if (tile instanceof DuctBlockEntity<?, ?> duct) {
+                duct.invalidateDuctModelData();
             }
         }
         return super.updateShape(stateIn, facing, facingState, worldIn, currentPos, facingPos);
