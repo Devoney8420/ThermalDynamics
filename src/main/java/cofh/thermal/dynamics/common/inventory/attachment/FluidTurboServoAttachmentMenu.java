@@ -11,7 +11,7 @@ import cofh.thermal.dynamics.common.attachment.FluidTurboServoAttachment;
 import cofh.thermal.dynamics.common.network.packet.server.AttachmentConfigPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -96,12 +96,12 @@ public class FluidTurboServoAttachmentMenu extends AttachmentMenu implements IFi
 
     // region NETWORK
     @Override
-    public FriendlyByteBuf getGuiPacket(FriendlyByteBuf buffer) {
+    public RegistryFriendlyByteBuf getGuiPacket(RegistryFriendlyByteBuf buffer) {
 
         byte size = (byte) filter.getFluids().size();
         buffer.writeByte(size);
         for (int i = 0; i < size; ++i) {
-            buffer.writeFluidStack(getFilterStacks().get(i));
+            FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, getFilterStacks().get(i));
         }
         buffer.writeInt(attachment.amountTransfer);
 
@@ -109,12 +109,12 @@ public class FluidTurboServoAttachmentMenu extends AttachmentMenu implements IFi
     }
 
     @Override
-    public void handleGuiPacket(FriendlyByteBuf buffer) {
+    public void handleGuiPacket(RegistryFriendlyByteBuf buffer) {
 
         byte size = buffer.readByte();
         List<FluidStack> fluidStacks = new ArrayList<>(size);
         for (int i = 0; i < size; ++i) {
-            fluidStacks.add(buffer.readFluidStack());
+            fluidStacks.add(FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer));
         }
         filterInventory.readFromSource(fluidStacks);
 

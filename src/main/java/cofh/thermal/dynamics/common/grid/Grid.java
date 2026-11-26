@@ -7,9 +7,11 @@ import it.unimi.dsi.fastutil.longs.*;
 import it.unimi.dsi.fastutil.objects.Object2ObjectRBTreeMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -29,7 +31,7 @@ import java.util.function.LongFunction;
 import static cofh.lib.util.Constants.DIRECTIONS;
 import static cofh.thermal.dynamics.api.helper.GridHelper.numBetween;
 import static java.util.Objects.requireNonNull;
-import static net.covers1624.quack.util.SneakyUtils.unsafeCast;
+import static cofh.thermal.dynamics.util.TDynUtil.uncheckedCast;
 
 /**
  * Represents a Grid of nodes in a World.
@@ -187,14 +189,14 @@ public abstract class Grid<G extends Grid<G, N>, N extends GridNode<G>> implemen
     }
 
     @Override
-    public CompoundTag serializeNBT() {
+    public CompoundTag serializeNBT(HolderLookup.Provider registries) {
 
         CompoundTag tag = new CompoundTag();
         ListTag nodes = new ListTag();
         for (N node : nodeGraph.nodes()) {
             CompoundTag nodeTag = new CompoundTag();
             nodeTag.put("pos", NbtUtils.writeBlockPos(node.getPos()));
-            nodeTag.merge(node.serializeNBT());
+            nodeTag.merge(node.serializeNBT(registries));
             nodes.add(nodeTag);
         }
         tag.put("nodes", nodes);
@@ -220,32 +222,57 @@ public abstract class Grid<G extends Grid<G, N>, N extends GridNode<G>> implemen
     }
 
     @Override
-    public void deserializeNBT(CompoundTag nbt) {
+    public void deserializeNBT(HolderLookup.Provider registries, CompoundTag nbt) {
 
         ListTag nodes = nbt.getList("nodes", 10);
 
         for (int i = 0; i < nodes.size(); ++i) {
             CompoundTag nodeTag = nodes.getCompound(i);
-            BlockPos pos = NbtUtils.readBlockPos(nodeTag.getCompound("pos"));
+            BlockPos pos = readPosition(nodeTag, "pos");
+            if (pos == null || this.nodes.containsKey(pos)) {
+                continue;
+            }
             GridNode<?> node = newNode(pos, false);
-            node.deserializeNBT(nodeTag);
+            node.deserializeNBT(registries, nodeTag);
         }
 
         ListTag edges = nbt.getList("edges", 10);
         for (int i = 0; i < edges.size(); ++i) {
             CompoundTag edgeTag = edges.getCompound(i);
-            BlockPos uPos = NbtUtils.readBlockPos(edgeTag.getCompound("U"));
-            BlockPos vPos = NbtUtils.readBlockPos(edgeTag.getCompound("V"));
-            nodeGraph.putEdge(this.nodes.get(uPos), this.nodes.get(vPos));
+            BlockPos uPos = readPosition(edgeTag, "U");
+            BlockPos vPos = readPosition(edgeTag, "V");
+            if (uPos == null || vPos == null) {
+                continue;
+            }
+            N u = this.nodes.get(uPos);
+            N v = this.nodes.get(vPos);
+            if (u != null && v != null && u != v) {
+                nodeGraph.putEdge(u, v);
+            }
         }
         ListTag updateable = nbt.getList("updateable", 10);
         for (int i = 0; i < updateable.size(); ++i) {
             CompoundTag updateTag = updateable.getCompound(i);
-            BlockPos pos = NbtUtils.readBlockPos(updateTag.getCompound("pos"));
-            updatableHosts.add(pos);
+            BlockPos pos = readPosition(updateTag, "pos");
+            if (pos != null) {
+                updatableHosts.add(pos);
+            }
         }
         // Make sure no Node positions are identity match to BlockPos.ZERO
         assert !DEBUG || this.nodes.values().stream().noneMatch(e -> e.getPos() == BlockPos.ZERO);
+    }
+
+    @Nullable
+    private static BlockPos readPosition(CompoundTag tag, String key) {
+
+        if (tag.contains(key, Tag.TAG_COMPOUND)) {
+            CompoundTag legacy = tag.getCompound(key);
+            if (legacy.contains("X", Tag.TAG_ANY_NUMERIC) && legacy.contains("Y", Tag.TAG_ANY_NUMERIC) && legacy.contains("Z", Tag.TAG_ANY_NUMERIC)) {
+                return new BlockPos(legacy.getInt("X"), legacy.getInt("Y"), legacy.getInt("Z"));
+            }
+            return null;
+        }
+        return NbtUtils.readBlockPos(tag, key).orElse(null);
     }
 
     public abstract N newNode();
@@ -329,17 +356,17 @@ public abstract class Grid<G extends Grid<G, N>, N extends GridNode<G>> implemen
         other.nodeGraph.nodes().forEach(e -> positionCollector.collectPosition(e.getPos()));
 
         // Iterate all in-world nodes and update the tracked grid.
-        updateGridHosts(world, positionCollector.getChunkPositions(), unsafeCast(this));
+        updateGridHosts(world, positionCollector.getChunkPositions(), uncheckedCast(this));
 
         // Insert all nodes into the Grid's lookup maps and update the node about the grid change.
         for (N node : other.nodeGraph.nodes()) {
             insertExistingNode(node);
             nodeGraph.addNode(node);
-            node.setGrid(unsafeCast(this));
-            node.onGridChange(unsafeCast(other));
+            node.setGrid(uncheckedCast(this));
+            node.onGridChange(uncheckedCast(other));
         }
         updatableHosts.addAll(other.updatableHosts);
-        onMerge(unsafeCast(other));
+        onMerge(uncheckedCast(other));
     }
 
     // Called to split the current grid into the specified partitions.
@@ -381,14 +408,14 @@ public abstract class Grid<G extends Grid<G, N>, N extends GridNode<G>> implemen
 
             // Insert all nodes into the Grid's lookup maps and update the node about the grid change.
             for (GridNode<?> node : splitGraph) {
-                node.setGrid(unsafeCast(newGrid));
-                node.onGridChange(unsafeCast(this));
+                node.setGrid(uncheckedCast(newGrid));
+                node.onGridChange(uncheckedCast(this));
             }
             newGrids.add(newGrid);
         }
 
         // Notify the current grid it has been split.
-        onSplit(unsafeCast(newGrids));
+        onSplit(uncheckedCast(newGrids));
         return newGrids;
     }
 
@@ -447,7 +474,7 @@ public abstract class Grid<G extends Grid<G, N>, N extends GridNode<G>> implemen
                     LOGGER.error("Node not connected to grid! Chunk modified externally. {}", pos);
                     continue;
                 }
-                gridHost.setGrid(unsafeCast(grid));
+                gridHost.setGrid(uncheckedCast(grid));
             }
         }
     }

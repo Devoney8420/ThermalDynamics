@@ -5,7 +5,7 @@ import cofh.thermal.dynamics.api.grid.IDuct;
 import cofh.thermal.dynamics.common.attachment.EnergyLimiterAttachment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -44,7 +44,7 @@ public class EnergyLimiterAttachmentMenu extends AttachmentMenu {
 
     // region NETWORK
     @Override
-    public FriendlyByteBuf getGuiPacket(FriendlyByteBuf buffer) {
+    public RegistryFriendlyByteBuf getGuiPacket(RegistryFriendlyByteBuf buffer) {
 
         buffer.writeInt(attachment.amountInput);
         buffer.writeInt(attachment.amountOutput);
@@ -53,7 +53,7 @@ public class EnergyLimiterAttachmentMenu extends AttachmentMenu {
     }
 
     @Override
-    public void handleGuiPacket(FriendlyByteBuf buffer) {
+    public void handleGuiPacket(RegistryFriendlyByteBuf buffer) {
 
         attachment.amountInput = buffer.readInt();
         attachment.amountOutput = buffer.readInt();

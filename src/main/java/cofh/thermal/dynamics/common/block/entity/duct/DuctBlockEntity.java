@@ -18,8 +18,11 @@ import cofh.thermal.dynamics.common.grid.Grid;
 import cofh.thermal.dynamics.common.grid.GridNode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -27,6 +30,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -131,7 +135,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
         if (attachments[side.ordinal()] != EmptyAttachment.INSTANCE) {
             return false;
         }
-        IAttachment attachment = AttachmentRegistry.getAttachment(type, new CompoundTag(), this, side);
+        IAttachment attachment = AttachmentRegistry.getAttachment(type, player.registryAccess(), new CompoundTag(), this, side);
         if (attachment == null || attachment == EmptyAttachment.INSTANCE) {
             return false;
         }
@@ -139,7 +143,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
         connections[side.ordinal()] = FORCED;
 
         ItemStack offhand = player.getItemInHand(InteractionHand.OFF_HAND);
-        if (offhand.hasTag() && offhand.getItem() instanceof RedprintItem) {
+        if (!offhand.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).isEmpty() && offhand.getItem() instanceof RedprintItem) {
             attachmentRedprintInteraction(offhand, side, player);
         }
         setChanged();
@@ -173,17 +177,20 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     public boolean attachmentRedprintInteraction(ItemStack stack, Direction side, Player player) {
 
         if (side != null && attachments[side.ordinal()] instanceof IConveyableData conveyableData) {
-            if (stack.getTag() == null) {
-                conveyableData.writeConveyableData(player, stack.getOrCreateTag());
-                if (stack.getTag().isEmpty()) {
-                    stack.setTag(null);
+            CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+            if (data.isEmpty()) {
+                CompoundTag copied = new CompoundTag();
+                conveyableData.writeConveyableData(player, copied);
+                if (copied.isEmpty()) {
                     return false;
                 }
-                player.level.playSound(null, player.blockPosition(), SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.5F, 0.7F);
+                stack.set(DataComponents.CUSTOM_DATA, CustomData.of(copied));
+                player.level().playSound(null, player.blockPosition(), SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.5F, 0.7F);
                 return true;
             }
-            conveyableData.readConveyableData(player, stack.getTag());
-            player.level.playSound(null, player.blockPosition(), SoundEvents.UI_BUTTON_CLICK.value(), SoundSource.PLAYERS, 0.5F, 0.8F);
+            conveyableData.readConveyableData(player, data.copyTag());
+            setChanged();
+            player.level().playSound(null, player.blockPosition(), SoundEvents.UI_BUTTON_CLICK.value(), SoundSource.PLAYERS, 0.5F, 0.8F);
             return true;
         }
         return false;
@@ -324,8 +331,9 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
 
     // STATE
     @Override
-    public FriendlyByteBuf getStatePacket(FriendlyByteBuf buffer) {
+    public RegistryFriendlyByteBuf getStatePacket(RegistryFriendlyByteBuf buffer) {
 
+        HolderLookup.Provider registries = buffer.registryAccess();
         modelData.setNeedsRefresh();
 
         for (ConnectionType connection : connections) {
@@ -334,7 +342,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
         CompoundTag tag = new CompoundTag();
         for (int i = 0; i < 6; ++i) {
             CompoundTag attachmentTag = new CompoundTag();
-            attachments[i].write(attachmentTag);
+            attachments[i].write(registries, attachmentTag);
             if (!attachmentTag.isEmpty()) {
                 tag.put(TAG_ATTACHMENT + i, attachmentTag);
             }
@@ -345,8 +353,9 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     }
 
     @Override
-    public void handleStatePacket(FriendlyByteBuf buffer) {
+    public void handleStatePacket(RegistryFriendlyByteBuf buffer) {
 
+        HolderLookup.Provider registries = buffer.registryAccess();
         for (int i = 0; i < 6; ++i) {
             connections[i] = ConnectionType.VALUES[buffer.readByte()];
         }
@@ -356,7 +365,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
             for (int i = 0; i < 6; ++i) {
                 if (tag.contains(TAG_ATTACHMENT + i)) {
                     CompoundTag attachmentTag = tag.getCompound(TAG_ATTACHMENT + i);
-                    attachments[i] = AttachmentRegistry.getAttachment(attachmentTag.getString(TAG_TYPE), attachmentTag, this, DIRECTIONS[i]);
+                    attachments[i] = AttachmentRegistry.getAttachment(attachmentTag.getString(TAG_TYPE), registries, attachmentTag, this, DIRECTIONS[i]);
                 } else {
                     attachments[i] = EmptyAttachment.INSTANCE;
                 }
@@ -368,16 +377,16 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
 
     // region NBT
     @Override
-    public CompoundTag getUpdateTag() {
+    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
 
         modelData.setNeedsRefresh();
-        return saveWithoutMetadata();
+        return saveWithoutMetadata(registries);
     }
 
     @Override
-    public void load(CompoundTag tag) {
+    protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
 
-        super.load(tag);
+        super.loadAdditional(tag, registries);
 
         redstonePower = tag.getInt(TAG_RS_POWER);
 
@@ -390,7 +399,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
         for (int i = 0; i < 6; ++i) {
             if (tag.contains(TAG_ATTACHMENT + i)) {
                 CompoundTag attachmentTag = tag.getCompound(TAG_ATTACHMENT + i);
-                attachments[i] = AttachmentRegistry.getAttachment(attachmentTag.getString(TAG_TYPE), attachmentTag, this, DIRECTIONS[i]);
+                attachments[i] = AttachmentRegistry.getAttachment(attachmentTag.getString(TAG_TYPE), registries, attachmentTag, this, DIRECTIONS[i]);
             } else {
                 attachments[i] = EmptyAttachment.INSTANCE;
             }
@@ -398,9 +407,9 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
     }
 
     @Override
-    public void saveAdditional(CompoundTag tag) {
+    public void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
 
-        super.saveAdditional(tag);
+        super.saveAdditional(tag, registries);
 
         tag.putInt(TAG_RS_POWER, redstonePower);
 
@@ -412,7 +421,7 @@ public abstract class DuctBlockEntity<G extends Grid<G, N>, N extends GridNode<G
 
         for (int i = 0; i < 6; ++i) {
             CompoundTag attachmentTag = new CompoundTag();
-            attachments[i].write(attachmentTag);
+            attachments[i].write(registries, attachmentTag);
             if (!attachmentTag.isEmpty()) {
                 tag.put(TAG_ATTACHMENT + i, attachmentTag);
             }

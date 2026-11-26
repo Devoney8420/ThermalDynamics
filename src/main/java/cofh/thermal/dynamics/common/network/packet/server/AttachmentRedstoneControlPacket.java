@@ -8,9 +8,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.network.PacketDistributor;
-import net.neoforged.neoforge.network.handling.PlayPayloadContext;
-
-import java.util.Optional;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 public class AttachmentRedstoneControlPacket {
 
@@ -21,18 +19,15 @@ public class AttachmentRedstoneControlPacket {
         return INSTANCE;
     }
 
-    public void handle(final AttachmentRedstoneControlPayload payload, final PlayPayloadContext context) {
+    public void handle(final AttachmentRedstoneControlPayload payload, final IPayloadContext context) {
 
-        context.workHandler().submitAsync(() -> {
+        context.enqueueWork(() -> {
 
-            Optional<Player> senderOptional = context.player();
-            if (senderOptional.isEmpty()) {
-                return;
-            }
-            Player player = senderOptional.get();
+            Player player = context.player();
 
-            Level world = player.level;
-            if (!world.isLoaded(payload.pos())) {
+            Level world = player.level();
+            if (!world.isLoaded(payload.pos()) || !player.canInteractWithBlock(payload.pos(), 0.0D)
+                    || payload.mode() < 0 || payload.mode() >= IRedstoneControllable.ControlMode.VALUES.length) {
                 return;
             }
             BlockEntity tile = world.getBlockEntity(payload.pos());
@@ -47,7 +42,7 @@ public class AttachmentRedstoneControlPacket {
         if (attachment == null) {
             return;
         }
-        PacketDistributor.SERVER.noArg().send(new AttachmentRedstoneControlPayload(attachment.pos(), attachment.side(), attachment.redstoneControl().getThreshold(), (byte) attachment.redstoneControl().getMode().ordinal()));
+        PacketDistributor.sendToServer(new AttachmentRedstoneControlPayload(attachment.pos(), attachment.side(), attachment.redstoneControl().getThreshold(), (byte) attachment.redstoneControl().getMode().ordinal()));
     }
 
 }

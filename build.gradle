@@ -2,16 +2,15 @@ plugins {
     id 'java'
     id 'maven-publish'
 
-    id 'com.github.johnrengelman.shadow' version '7.1.2'
     id 'com.matthewprenger.cursegradle' version '1.4.0'
     id 'com.modrinth.minotaur' version "2.+"
 
-    id 'net.neoforged.gradle.userdev' version '7.0.97'
+    id 'net.neoforged.moddev' version '2.0.148'
 }
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(java_version.toInteger())
     }
     withSourcesJar()
     // withJavadocJar()
@@ -26,11 +25,41 @@ base {
 
 def buildVersion = "${mod_version}." + (System.getenv("BUILD_NUMBER") ?: '0')
 version = "${mc_version}-${buildVersion}"
-println "Starting build of ${archivesBaseName}, Version: ${mod_version}"
+println "Starting build of ${base.archivesName.get()}, Version: ${mod_version}"
 println "Using NeoForge: ${neo_version}, for Minecraft: ${mc_version}"
 
-minecraft {
-    accessTransformers.file file("src/main/resources/META-INF/accesstransformer.cfg")
+neoForge {
+    version = neo_version
+    addModdingDependenciesTo(sourceSets.test)
+    runs {
+        client { client() }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+        data {
+            data()
+            programArguments.addAll '--mod', mod_id, '--all', '--output',
+                    file('src/main/generated').absolutePath, '--existing',
+                    file('src/main/resources').absolutePath
+        }
+    }
+    mods {
+        "${mod_id}" { sourceSet(sourceSets.main) }
+        thermal_dynamics_tests { sourceSet(sourceSets.test) }
+    }
+    runs.configureEach {
+        loadedMods.set([mods.named(mod_id).get()])
+    }
+    runs.create('blockStateTests') {
+        data()
+        sourceSet = sourceSets.test
+        loadedMods.set([mods.named(mod_id).get(), mods.named('thermal_dynamics_tests').get()])
+        gameDirectory = layout.buildDirectory.dir('block-state-tests/run')
+        programArguments.addAll '--mod', 'thermal_dynamics_tests', '--all', '--output',
+                layout.buildDirectory.dir('block-state-tests/data').get().asFile.absolutePath
+        disableIdeRun()
+    }
 }
 
 if (System.getenv('CURSEFORGE_KEY') || project.hasProperty('curseforgeKey')) {
@@ -45,7 +74,7 @@ if (System.getenv('CURSEFORGE_KEY') || project.hasProperty('curseforgeKey')) {
             changelogType = 'markdown'
             changelog = "[Changelog on GitHub - ${version}](https://raw.githubusercontent.com/cofh/version/main/${mod_id}/changelog.md)"
             releaseType = "${release_type}"
-            mainArtifact(shadowJar)
+            mainArtifact(jar)
             addGameVersion "Java ${java_version}"
             addGameVersion "${mc_version}"
         }
@@ -62,28 +91,23 @@ if (System.getenv('MODRINTH_TOKEN') || project.hasProperty('modrinthToken')) {
         versionNumber = "${mod_version}"
         versionType = "${release_type}"
         changelog = "[Changelog on GitHub - ${version}](https://raw.githubusercontent.com/cofh/version/main/${mod_id}/changelog.md)"
-        uploadFile = shadowJar
+        uploadFile = jar
         gameVersions = ["${mc_version}"]
     }
 }
 
 processResources {
-    filesMatching('META-INF/mods.toml') {
-        expand 'file': ['jarVersion': mod_version],
-                'mc_version': mc_version,
-                'neo_version': neo_version,
-                'lang_version': neo_version.split('\\.')[0],
-                'cofh_core_version_range': "[${cofh_core_version.replace(".+", "")},${cofh_core_max_version})",
-                'thermal_core_version_range': "[${thermal_core_version.replace(".+", "")},${thermal_core_max_version})"
+    def metadata = [mod_version: mod_version, mc_version: mc_version, neo_version: neo_version,
+                    cofh_core_version_range: "[${cofh_core_version},${cofh_core_max_version})",
+                    thermal_core_version_range: "[${thermal_core_version},${thermal_core_max_version})"]
+    inputs.properties metadata
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand metadata
     }
 }
 
-configurations {
-    shadow
-    implementation.extendsFrom shadow
-}
-
 repositories {
+    mavenCentral()
     mavenLocal()
     maven { url 'https://maven.covers1624.net/' }
     maven { url 'https://maven.blamejared.com/' }
@@ -91,14 +115,9 @@ repositories {
 }
 
 dependencies {
-    implementation("net.neoforged:neoforge:${neo_version}")
-
-    implementation("com.teamcofh:cofh_core:${mc_version}-${cofh_core_version}+")
-    implementation("com.teamcofh:thermal_core:${mc_version}-${thermal_core_version}+")
-
-    shadow("net.covers1624:Quack:0.4.10.105")
-
-    compileOnly("org.jetbrains:annotations:22.0.0")
+    def cofhCoreJar = providers.gradleProperty('cofhCoreJar').getOrElse("../../outputs/cofh_core-${mc_version}-${cofh_core_version}.1.jar")
+    def thermalCoreJar = providers.gradleProperty('thermalCoreJar').getOrElse("../../outputs/thermal_core-${mc_version}-${thermal_core_version}.2.jar")
+    implementation files(cofhCoreJar, thermalCoreJar)
 
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.2")
@@ -120,42 +139,28 @@ def commonManifest = {
     ])
 }
 
-jar.enabled = false
-shadowJar {
-    finalizedBy 'signShadowJar'
-    archiveClassifier = 'universal'
+tasks.named('jar') {
     manifest commonManifest
-
-    configurations = [project.configurations.shadow]
-    relocate 'net.covers1624.quack', 'cofh.requack'
 }
 
-tasks.register("signShadowJar") {
-    dependsOn("shadowJar")
-
-    doFirst {
-        def args = [:]
-        args['jar'] = jar.archiveFile.get().asFile
-        if (System.getenv("KEY_STORE")) {
-            args['keyStore'] = System.getenv("KEY_STORE")
-            file(System.getenv("KEY_STORE_PROPS")).withReader {
-                def props = new Properties()
-                props.load(it)
-                args.addAll(props)
+tasks.register('verifyStandaloneJar') {
+    def archive = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    inputs.file(archive)
+    doLast {
+        new java.util.zip.ZipFile(archive.get().asFile).withCloseable { zip ->
+            def foreignEntries = zip.entries().findAll { entry ->
+                entry.name.endsWith('.jar') || entry.name.startsWith('META-INF/jarjar/') ||
+                        (entry.name.endsWith('.class') && !entry.name.startsWith('cofh/thermal/dynamics/'))
             }
-        } else if (project.hasProperty('keyStore')) {
-            args['keyStore'] = project.getProperty('keyStore')
-            args['alias'] = project.getProperty('keyStoreAlias')
-            args['storePass'] = project.getProperty('keyStorePass')
-            args['keyPass'] = project.getProperty('keyStoreKeyPass')
-        } else {
-            println "No signing properties."
-            state.setOutcome(org.gradle.api.internal.tasks.TaskExecutionOutcome.UP_TO_DATE)
-            didWork = false
-            return
+            if (!foreignEntries.isEmpty()) {
+                throw new GradleException("Foreign content in Thermal Dynamics JAR: ${foreignEntries*.name}")
+            }
         }
-        project.ant.invokeMethod('signjar', args)
     }
+}
+
+tasks.named('check') {
+    dependsOn 'runBlockStateTests', 'verifyStandaloneJar'
 }
 
 publishing {
@@ -173,14 +178,13 @@ publishing {
     publications {
         mod(MavenPublication) {
             groupId project.group
-            artifactId project.archivesBaseName
+            artifactId project.base.archivesName.get()
             version project.version
-            artifact shadowJar
-            artifact sourcesJar
+            from components.java
 
             pom {
-                name = archivesBaseName
-                description = archivesBaseName
+                name = base.archivesName.get()
+                description = base.archivesName.get()
                 url = "https://github.com/CoFH/${project.name}"
                 scm {
                     url = "https://github.com/CoFH/${project.name}"

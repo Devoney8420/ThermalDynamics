@@ -1,0 +1,15 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "CoFH - Don't Be A Jerk (Learn, Don't Steal)"
+
+[[mods]]
+modId = "thermal_dynamics_tests"
+version = "1"
+displayName = "Thermal Dynamics Tests"
+
+[[dependencies.thermal_dynamics_tests]]
+modId = "thermal_dynamics"
+type = "required"
+versionRange = "[11.0.1,11.1.0)"
+ordering = "AFTER"
+side = "CLIENT"

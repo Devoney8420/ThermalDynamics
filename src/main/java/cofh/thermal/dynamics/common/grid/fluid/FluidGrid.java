@@ -6,6 +6,7 @@ import cofh.thermal.dynamics.api.helper.GridHelper;
 import cofh.thermal.dynamics.common.block.entity.duct.DuctBlockEntity;
 import cofh.thermal.dynamics.common.grid.Grid;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -115,7 +116,7 @@ public class FluidGrid extends Grid<FluidGrid, FluidGridNode> implements IFluidH
     private void renderUpdate() {
 
         prevRenderFluid = renderFluid;
-        renderFluid = new FluidStack(getFluid(), BUCKET_VOLUME);
+        renderFluid = getFluid().copyWithAmount(BUCKET_VOLUME);
 
         if (!FluidHelper.fluidsEqual(prevRenderFluid, renderFluid) || wasFilled && timeTracker.hasDelayPassed(world, 40) || needsUpdate) {
             if (!wasFilled && renderFluid.isEmpty()) {
@@ -142,7 +143,8 @@ public class FluidGrid extends Grid<FluidGrid, FluidGridNode> implements IFluidH
 
         storage.setBaseCapacity(Math.max(TANK_MEDIUM, getNodes().size() * NODE_CAPACITY));
         storage.setCapacity(this.getCapacity() + from.getCapacity());
-        storage.setFluid(new FluidStack(storage.getFluid(), this.getFluidAmount() + from.getFluidAmount()));
+        FluidStack mergedFluid = getFluid().isEmpty() ? from.getFluid() : getFluid();
+        storage.setFluid(mergedFluid.copyWithAmount(getFluidAmount() + from.getFluidAmount()));
 
         needsUpdate = true;
 
@@ -173,25 +175,25 @@ public class FluidGrid extends Grid<FluidGrid, FluidGridNode> implements IFluidH
 
         for (FluidGrid grid : others) {
             int gridNodes = grid.getNodes().size();
-            grid.setFluid(new FluidStack(getFluid(), (fluidPerNode * gridNodes)));
+            grid.setFluid(getFluid().copyWithAmount(fluidPerNode * gridNodes));
         }
         // First grid gets the extra. Why? Because there's always a first grid.
-        others.get(0).setFluid(new FluidStack(getFluid(), others.get(0).getFluid().getAmount() + remFluid));
+        others.get(0).setFluid(getFluid().copyWithAmount(others.get(0).getFluid().getAmount() + remFluid));
     }
 
     @Override
-    public CompoundTag serializeNBT() {
+    public CompoundTag serializeNBT(HolderLookup.Provider registries) {
 
-        CompoundTag tag = super.serializeNBT();
-        storage.write(tag);
+        CompoundTag tag = super.serializeNBT(registries);
+        storage.write(registries, tag);
         return tag;
     }
 
     @Override
-    public void deserializeNBT(CompoundTag nbt) {
+    public void deserializeNBT(HolderLookup.Provider registries, CompoundTag nbt) {
 
-        super.deserializeNBT(nbt);
-        storage.deserializeNBT(nbt);
+        super.deserializeNBT(registries, nbt);
+        storage.deserializeNBT(registries, nbt);
     }
 
     @Override

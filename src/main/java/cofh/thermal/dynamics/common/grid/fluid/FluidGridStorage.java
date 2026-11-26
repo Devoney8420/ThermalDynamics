@@ -1,5 +1,7 @@
 package cofh.thermal.dynamics.common.grid.fluid;
 
+import cofh.lib.util.helpers.StackData;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.neoforged.neoforge.common.util.INBTSerializable;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -114,9 +116,9 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
     }
 
     // region NBT
-    public FluidGridStorage read(CompoundTag nbt) {
+    public FluidGridStorage read(HolderLookup.Provider registries, CompoundTag nbt) {
 
-        setFluid(FluidStack.loadFluidStackFromNBT(nbt));
+        setFluid(StackData.readFluid(registries, nbt));
         this.baseCapacity = nbt.getInt(TAG_CAPACITY);
 
         //        this.averageIn = nbt.getInt(TAG_TRACK_IN);
@@ -126,9 +128,9 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
         return this;
     }
 
-    public CompoundTag write(CompoundTag nbt) {
+    public CompoundTag write(HolderLookup.Provider registries, CompoundTag nbt) {
 
-        fluid.writeToNBT(nbt);
+        StackData.writeFluid(registries, fluid, nbt);
         nbt.putInt(TAG_CAPACITY, baseCapacity);
 
         //        nbt.putInt(TAG_TRACK_IN, averageIn);
@@ -138,15 +140,15 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
     }
 
     @Override
-    public CompoundTag serializeNBT() {
+    public CompoundTag serializeNBT(HolderLookup.Provider registries) {
 
-        return write(new CompoundTag());
+        return write(registries, new CompoundTag());
     }
 
     @Override
-    public void deserializeNBT(CompoundTag nbt) {
+    public void deserializeNBT(HolderLookup.Provider registries, CompoundTag nbt) {
 
-        read(nbt);
+        read(registries, nbt);
     }
     // endregion
 
@@ -173,16 +175,16 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
             if (fluid.isEmpty()) {
                 return Math.min(capacity, resource.getAmount());
             }
-            if (!fluid.isFluidEqual(resource)) {
+            if (!FluidStack.isSameFluidSameComponents(fluid, resource)) {
                 return 0;
             }
-            return Math.min(capacity - fluid.getAmount(), resource.getAmount());
+            return Math.max(0, Math.min(capacity - fluid.getAmount(), resource.getAmount()));
         }
         if (fluid.isEmpty()) {
-            setFluid(new FluidStack(resource, Math.min(capacity, resource.getAmount())));
+            setFluid(resource.copyWithAmount(Math.min(capacity, resource.getAmount())));
             return fluid.getAmount();
         }
-        if (!fluid.isFluidEqual(resource)) {
+        if (!FluidStack.isSameFluidSameComponents(fluid, resource)) {
             return 0;
         }
         if (fluid.getAmount() >= capacity) {
@@ -203,7 +205,7 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
     @Override
     public FluidStack drain(FluidStack resource, FluidAction action) {
 
-        if (resource.isEmpty() || !resource.isFluidEqual(fluid)) {
+        if (resource.isEmpty() || !FluidStack.isSameFluidSameComponents(fluid, resource)) {
             return FluidStack.EMPTY;
         }
         return drain(resource.getAmount(), action);
@@ -220,7 +222,7 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
         if (fluid.getAmount() < drained) {
             drained = fluid.getAmount();
         }
-        FluidStack stack = new FluidStack(fluid, drained);
+        FluidStack stack = fluid.copyWithAmount(drained);
         if (action.execute()) {
             fluid.shrink(drained);
             if (fluid.isEmpty()) {
