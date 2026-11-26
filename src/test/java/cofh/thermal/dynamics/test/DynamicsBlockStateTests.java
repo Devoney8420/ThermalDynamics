@@ -130,6 +130,11 @@ public final class DynamicsBlockStateTests {
         legacy.putInt("Amount", 400);
         legacy.putInt(TAG_CAPACITY, 1000);
         FluidGridStorage storage = new FluidGridStorage(1000);
+        require(storage.fill(new FluidStack(Fluids.WATER, 1200), FluidAction.SIMULATE) == 1000,
+                "A new grid must accept fluid on its first tick");
+        storage.setBaseCapacity(1500);
+        require(storage.fill(new FluidStack(Fluids.WATER, 1200), FluidAction.SIMULATE) == 1200,
+                "The grid must start using its increased capacity immediately");
         storage.deserializeNBT(registries, legacy);
         require(storage.getFluid().is(Fluids.WATER.getFluidType()) && storage.getFluid().getAmount() == 400,
                 "Legacy fluid did not load");

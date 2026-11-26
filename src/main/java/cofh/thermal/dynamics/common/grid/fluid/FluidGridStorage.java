@@ -31,12 +31,13 @@ public final class FluidGridStorage implements IFluidHandler, INBTSerializable<C
 
     public FluidGridStorage(int baseCapacity) {
 
-        this.baseCapacity = baseCapacity;
+        setBaseCapacity(baseCapacity);
     }
 
     public FluidGridStorage setBaseCapacity(int baseCapacity) {
 
         this.baseCapacity = Math.max(0, baseCapacity);
+        capacity = Math.max(this.baseCapacity, capacity);
         //        if (!this.fluid.isEmpty()) {
         //            this.fluid.setAmount(MathHelper.clamp(this.fluid.getAmount(), 0, baseCapacity));
         //        }
